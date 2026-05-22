@@ -1,0 +1,17 @@
+# Variables de entorno — NUNCA subir a GitHub
+.env
+
+# Cache de Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Entornos virtuales
+venv/
+.venv/
+env/
+
+# Archivos del sistema
+.DS_Store
+Thumbs.db

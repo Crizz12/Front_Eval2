@@ -1,131 +1,197 @@
-# Frontend - Aplicación Web con Flask
+# Frontend — Innovatech Chile
 
-## Descripción
-Frontend desarrollado en Python con el framework Flask. Proporciona una interfaz web completa para la gestión de usuarios, con comunicación RESTful con el backend API.
+Interfaz web de gestión de usuarios desarrollada en **Python + Flask**. Se comunica con el Backend API mediante peticiones HTTP REST y se despliega como contenedor Docker en AWS EC2.
 
-## Versiones y Herramientas Requeridas
+---
 
-### Lenguaje y Runtime
-- **Python**: Versión 3.8 o superior
-- **pip**: Versión 21.0 o superior (gestor de paquetes de Python)
+## Arquitectura del sistema
 
-### Dependencias Principales
-- **Flask**: ^2.3.3 - Framework web micro para Python
-- **Flask-CORS**: ^4.0.0 - Middleware para habilitar CORS
-- **requests**: ^2.31.0 - Librería para peticiones HTTP
-- **python-dotenv**: ^1.0.0 - Manejo de variables de entorno
-- **Jinja2**: ^3.1.2 - Motor de plantillas (incluido con Flask)
-
-## Instalación
-
-```bash
-# Crear entorno virtual (recomendado)
-python -m venv venv
-
-# Activar entorno virtual
-# Windows:
-venv\Scripts\activate
-# Linux/Mac:
-source venv/bin/activate
-
-# Instalar dependencias
-pip install -r requirements.txt
+```
+Internet
+    │
+    ▼ (puerto 80)
+┌─────────────────┐        red Docker interna         ┌──────────────────┐
+│   EC2 pública   │ ──── http://proyecto_backend:3000 ──► EC2 / Backend   │
+│   Frontend      │                                    │   (sin puerto    │
+│   Flask :5000   │                                    │    expuesto)     │
+└─────────────────┘                                    └──────────────────┘
 ```
 
-## Configuración
+- **Solo el Frontend es accesible desde Internet** (puerto 80).
+- El Backend se comunica con el Frontend a través de la red interna Docker (`red_proyecto`), sin estar expuesto públicamente.
 
-1. Copiar el archivo de variables de entorno:
+---
+
+## Estructura del repositorio
+
+```
+Front_Eval2/
+├── .github/
+│   └── workflows/
+│       └── deploy.yml      ← Pipeline CI/CD (GitHub Actions)
+├── templates/
+│   ├── base.html
+│   ├── index.html
+│   ├── crear_usuario.html
+│   ├── editar_usuario.html
+│   ├── 404.html
+│   └── 500.html
+├── app.py                  ← Aplicación Flask principal
+├── requirements.txt        ← Dependencias Python
+├── Dockerfile              ← Imagen Docker multi-stage
+├── docker-compose.yml      ← Levanta el Frontend de forma independiente
+├── .env.example            ← Plantilla de variables de entorno
+├── .gitignore
+└── README.md
+```
+
+---
+
+## Requisitos previos
+
+| Herramienta | Versión mínima |
+|---|---|
+| Docker Desktop | 24.x |
+| Docker Compose | v2.x |
+| Python (sin Docker) | 3.8+ |
+
+---
+
+## Ejecución con Docker (recomendado)
+
+### 1. Configurar variables de entorno
+
 ```bash
 cp .env.example .env
 ```
 
-2. Editar el archivo `.env` con tu configuración:
-```
-PORT=5000
-DEBUG=False
-BACKEND_URL=http://localhost:3000
-SECRET_KEY=clave_secreta_muy_segura_aqui
+Editar `.env`:
+
+```env
+BACKEND_URL=http://localhost:3000   # URL del backend (ajustar según entorno)
+SECRET_KEY=una_clave_muy_segura
 ```
 
-## Ejecución
+### 2. Levantar el contenedor
 
 ```bash
-# Para desarrollo
-python app.py
-
-# O con variables de entorno
-FLASK_ENV=development python app.py
+docker-compose up --build
 ```
 
-## Estructura del Proyecto
+El frontend quedará disponible en: `http://localhost`
 
-```
-frontend/
-├── app.py                 # Aplicación principal Flask
-├── requirements.txt       # Dependencias Python
-├── .env.example          # Ejemplo de variables de entorno
-├── .env                  # Variables de entorno (crear manualmente)
-├── templates/            # Plantillas HTML
-│   ├── base.html         # Plantilla base
-│   ├── index.html        # Página principal
-│   ├── crear_usuario.html# Formulario crear usuario
-│   ├── editar_usuario.html# Formulario editar usuario
-│   ├── 404.html          # Página error 404
-│   └── 500.html          # Página error 500
-├── static/               # Archivos estáticos (CSS, JS, imágenes)
-└── README.md             # Este archivo
+### 3. Detener
+
+```bash
+docker-compose down
 ```
 
-## Funcionalidades
+---
 
-### Páginas Disponibles
-- **Página Principal (`/`)**: Lista todos los usuarios con opciones de CRUD
-- **Crear Usuario (`/crear`)**: Formulario para agregar nuevos usuarios
-- **Editar Usuario (`/editar/<id>`)**: Formulario para modificar usuarios existentes
-- **Eliminar Usuario**: Botón de acción en la lista principal
+## Dockerfile — Multi-stage build
 
-### Características Técnicas
-- **Responsive Design**: Interfaz adaptable a diferentes dispositivos
-- **Bootstrap 5**: Framework CSS para estilos modernos
-- **Font Awesome**: Iconos profesionales
-- **Validación**: Validación en cliente y servidor
-- **Mensajes Flash**: Notificaciones al usuario
-- **Manejo de Errores**: Páginas personalizadas para errores 404 y 500
+El `Dockerfile` usa **dos etapas** para reducir el tamaño final de la imagen:
 
-## Comunicación con Backend
+| Etapa | Imagen base | Propósito |
+|---|---|---|
+| `builder` | `python:3.11-slim` | Instala dependencias con pip |
+| producción | `python:3.11-slim` | Solo contiene el código y paquetes necesarios |
 
-La aplicación se comunica con el backend API mediante peticiones HTTP REST:
+**Buenas prácticas aplicadas:**
+- Usuario sin privilegios root (`appuser`) → seguridad de mínimo privilegio
+- Copia de dependencias con `--no-cache-dir` → imagen más liviana
+- Variables `PYTHONUNBUFFERED=1` → logs en tiempo real
 
-```python
-# Ejemplo de petición GET para obtener usuarios
-response = requests.get(f'{BACKEND_URL}/api/usuarios')
-usuarios = response.json()
+---
 
-# Ejemplo de petición POST para crear usuario
-response = requests.post(f'{BACKEND_URL}/api/usuarios', json=datos_usuario)
+## Variables de entorno
+
+| Variable | Descripción | Valor por defecto |
+|---|---|---|
+| `PORT` | Puerto del servidor Flask | `5000` |
+| `DEBUG` | Modo debug | `False` |
+| `BACKEND_URL` | URL del Backend API | `http://localhost:3000` |
+| `SECRET_KEY` | Clave secreta para sesiones Flask | *(requerida)* |
+
+> **Importante:** El archivo `.env` nunca debe subirse a GitHub. Está incluido en `.gitignore`.
+
+---
+
+## Pipeline CI/CD (GitHub Actions)
+
+El archivo `.github/workflows/deploy.yml` automatiza el flujo completo:
+
+```
+push en rama 'deploy'
+        │
+        ▼
+  [Job 1] Build & Push
+  ┌─────────────────────────┐
+  │ 1. Checkout del código  │
+  │ 2. Login a Docker Hub   │
+  │ 3. Build imagen Docker  │
+  │ 4. Push → Docker Hub    │
+  │    (tags: latest + SHA) │
+  └─────────────────────────┘
+        │
+        ▼ (solo si Job 1 fue exitoso)
+  [Job 2] Deploy en EC2
+  ┌─────────────────────────┐
+  │ 1. SSH a instancia EC2  │
+  │ 2. docker pull latest   │
+  │ 3. docker stop/rm old   │
+  │ 4. docker run new       │
+  └─────────────────────────┘
 ```
 
-## Puertos Requeridos
+### Secrets requeridos en GitHub
 
-### Para funcionamiento en contenedor:
-- **Puerto 5000**: Puerto del servidor frontend Flask (HTTP)
-- **Puerto 3000**: Puerto de comunicación con backend API (externo)
+Ir a: **Settings → Secrets and variables → Actions → New repository secret**
 
-### Explicación de puertos:
-- **5000**: Es el puerto donde escucha el servidor Flask para servir la aplicación web
-- **3000**: Es el puerto del backend API al que el frontend se conecta para obtener/enviar datos
+| Secret | Descripción |
+|---|---|
+| `DOCKERHUB_USERNAME` | Tu usuario de Docker Hub |
+| `DOCKERHUB_TOKEN` | Token de acceso de Docker Hub |
+| `EC2_HOST` | IP pública de la instancia EC2 |
+| `EC2_USER` | Usuario SSH (`ubuntu` en Amazon Linux 2 es `ec2-user`) |
+| `EC2_SSH_KEY` | Contenido completo del archivo `.pem` |
+| `SECRET_KEY` | Clave secreta para sesiones Flask |
 
-## Variables de Entorno
+---
 
-| Variable | Descripción | Valor por Defecto |
-|----------|-------------|-------------------|
-| `PORT` | Puerto del servidor Flask | 5000 |
-| `DEBUG` | Modo debug (True/False) | False |
-| `BACKEND_URL` | URL del backend API | http://localhost:3000 |
-| `SECRET_KEY` | Clave secreta para sesiones | clave_secreta_por_defecto |
+## Funcionalidades de la aplicación
 
-## Notas Importantes
-- El backend API debe estar corriendo antes de iniciar el frontend
-- Asegúrate de que las URLs en las variables de entorno sean correctas
-- En producción, establece `DEBUG=False` y usa una `SECRET_KEY` segura
-- La aplicación está diseñada para funcionar con el backend API de este proyecto
+| Ruta | Método | Descripción |
+|---|---|---|
+| `/` | GET | Lista todos los usuarios |
+| `/crear` | GET / POST | Formulario para crear usuario |
+| `/editar/<id>` | GET / POST | Formulario para editar usuario |
+| `/eliminar/<id>` | POST | Elimina un usuario |
+
+---
+
+## Despliegue manual en EC2
+
+Una vez que el contenedor del Backend esté corriendo en la misma instancia:
+
+```bash
+# Crear red compartida (si no existe)
+docker network create red_proyecto
+
+# Levantar el Frontend
+docker run -d \
+  --name proyecto_frontend \
+  --network red_proyecto \
+  --restart unless-stopped \
+  -p 80:5000 \
+  -e BACKEND_URL=http://proyecto_backend:3000 \
+  -e SECRET_KEY="tu_clave_secreta" \
+  tu_usuario/frontend-eval2:latest
+```
+
+Verificar que está corriendo:
+
+```bash
+docker ps
+curl http://localhost
+```

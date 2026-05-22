@@ -1,0 +1,95 @@
+name: CI/CD Frontend — Innovatech Chile
+
+# ============================================================
+# Pipeline de Integración y Despliegue Continuo — Frontend
+#
+# Flujo:  push en rama 'deploy'
+#          → build imagen Docker
+#          → push a Docker Hub
+#          → deploy automático en EC2
+#
+# Secrets requeridos en GitHub (Settings → Secrets → Actions):
+#   DOCKERHUB_USERNAME  : usuario de Docker Hub
+#   DOCKERHUB_TOKEN     : token de acceso de Docker Hub
+#   EC2_HOST            : IP pública de la instancia EC2
+#   EC2_USER            : usuario SSH de EC2 (ej: ubuntu)
+#   EC2_SSH_KEY         : clave privada SSH (contenido del archivo .pem)
+#   SECRET_KEY          : clave secreta para sesiones Flask
+# ============================================================
+
+on:
+  push:
+    branches:
+      - deploy
+
+jobs:
+
+  # ─────────────────────────────────────────
+  # JOB 1: Construir y publicar imagen Docker
+  # ─────────────────────────────────────────
+  build-and-push:
+    name: Build y Push a Docker Hub
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout del repositorio
+        uses: actions/checkout@v4
+
+      - name: Login a Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Construir y publicar imagen Docker
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          # Se publica con dos tags: 'latest' y el SHA del commit para trazabilidad
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/frontend-eval2:latest
+            ${{ secrets.DOCKERHUB_USERNAME }}/frontend-eval2:${{ github.sha }}
+
+  # ─────────────────────────────────────────
+  # JOB 2: Desplegar en instancia EC2
+  # ─────────────────────────────────────────
+  deploy:
+    name: Deploy en EC2
+    runs-on: ubuntu-latest
+    needs: build-and-push  # Solo se ejecuta si el build fue exitoso
+
+    steps:
+      - name: Conectar a EC2 y desplegar contenedor
+        uses: appleboy/ssh-action@v1.0.0
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            # Crear red Docker compartida (si no existe)
+            docker network create red_proyecto 2>/dev/null || true
+
+            # Descargar la imagen actualizada desde Docker Hub
+            docker pull ${{ secrets.DOCKERHUB_USERNAME }}/frontend-eval2:latest
+
+            # Detener y eliminar el contenedor anterior (sin error si no existe)
+            docker stop proyecto_frontend 2>/dev/null || true
+            docker rm   proyecto_frontend 2>/dev/null || true
+
+            # Iniciar el nuevo contenedor del Frontend
+            # -p 80:5000  → accesible desde Internet por el puerto 80
+            # --network   → puede comunicarse con el backend por nombre de contenedor
+            docker run -d \
+              --name proyecto_frontend \
+              --network red_proyecto \
+              --restart unless-stopped \
+              -p 80:5000 \
+              -e PORT=5000 \
+              -e DEBUG=False \
+              -e BACKEND_URL=http://proyecto_backend:3000 \
+              -e SECRET_KEY="${{ secrets.SECRET_KEY }}" \
+              ${{ secrets.DOCKERHUB_USERNAME }}/frontend-eval2:latest
+
+            echo "✓ Frontend desplegado correctamente"
+            docker ps --filter "name=proyecto_frontend" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
